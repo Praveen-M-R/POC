@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "https://a1bb-202-83-17-71.ngrok-free.app"
 st.set_page_config(layout="wide", page_title="POC for Notesight")
 
 st.sidebar.title("Features")
