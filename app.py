@@ -5,7 +5,7 @@ BASE_URL = "https://a1bb-202-83-17-71.ngrok-free.app"
 st.set_page_config(layout="wide", page_title="POC for Notesight")
 
 st.sidebar.title("Features")
-page = st.sidebar.radio("Go to", ["Notes", "Flashcards", "Chat", "MCQ"])
+page = st.sidebar.radio("Go to", ["Notes"])
 
 if "flashcards" not in st.session_state:
     st.session_state.flashcards = []
