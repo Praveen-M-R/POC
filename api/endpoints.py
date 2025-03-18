@@ -26,6 +26,15 @@ from services.auth import hash_password, verify_password, create_access_token, d
 from datastorage.db_connect import users_collection
 from datetime import timedelta
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from services.auth import get_user_by_id
+from core.config import MONGO_URI
+from pymongo import MongoClient
+from bson import ObjectId
+client = MongoClient(MONGO_URI)
+db = client["school_database"]
+users_collection = db["users"]
+reports_collection = db["reports"]
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -54,16 +63,37 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @router.get("/me/")
 async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Retrieves the logged-in user's data."""
+    """Retrieves the logged-in user's data and refreshes token if expired."""
+    decoded_data = decode_access_token(token)
+
+    user = get_user_by_id(decoded_data["payload"].get("sub"))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    response_data = {"username": user["username"], "reports": user.get("reports", [])}
+
+    if decoded_data["new_token"]:
+        response_data["new_access_token"] = decoded_data["new_token"]
+
+    return response_data
+
+@router.put("/update-profile/")
+async def update_profile(new_password: str = Form(None), token: str = Depends(oauth2_scheme)):
+    """Updates the user's profile (currently only allows password change)."""
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     user = get_user_by_username(payload.get("sub"))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return {"username": user["username"], "reports": user.get("reports", [])}
+    update_data = {}
+    if new_password:
+        update_data["password"] = hash_password(new_password)
+
+    users_collection.update_one({"_id": user["_id"]}, {"$set": update_data})
+    return {"message": "Profile updated successfully"}
 
 
 @router.post("/flashcards/")
@@ -213,3 +243,58 @@ async def upload_and_generate_report(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/report-profile/")
+async def upload_and_generate_report(file: UploadFile = File(...), token: str = Depends(oauth2_scheme)):
+    """Uploads a PDF, generates a report, saves it to MongoDB, and links it to the user."""
+    try:
+        pdf_data = await file.read()
+        student_report = process_pdf(pdf_data)
+
+        if isinstance(student_report, dict): 
+            saved_report = save_student_report(student_report)
+
+            # Link report to user
+            decoded_data = decode_access_token(token)
+            user_id = decoded_data["payload"].get("sub")
+            if not user_id:
+                raise HTTPException(status_code=401, detail="Unauthorized")
+
+            users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"latest_report_id": saved_report["_id"]}}
+            )
+
+            return {"message": "Report generated and saved successfully", "data": saved_report}
+        else:
+            return {"message": "Failed to generate a structured report", "data": student_report}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/profile/")
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    """Retrieves the logged-in user's data along with their latest report."""
+    decoded_data = decode_access_token(token)
+    user = get_user_by_id(decoded_data["payload"].get("sub"))
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Fetch the latest report if available
+    latest_report = None
+    if "latest_report_id" in user:
+        latest_report = reports_collection.find_one({"_id": ObjectId(user["latest_report_id"])})
+        if latest_report:
+            latest_report["_id"] = str(latest_report["_id"])
+
+    response_data = {
+        "username": user["username"],
+        "reports": user.get("reports", []),
+        "latest_report": latest_report
+    }
+
+    if decoded_data["new_token"]:
+        response_data["new_access_token"] = decoded_data["new_token"]
+
+    return response_data

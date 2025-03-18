@@ -164,6 +164,12 @@ def mcq_generation():
     selected_model = st.selectbox("🤖 Select AI Model", list(MODEL_OPTIONS.keys()))
     selected_model_key = MODEL_OPTIONS[selected_model]
 
+    if "mcqs" not in st.session_state:
+        st.session_state["mcqs"] = []
+
+    if "mcq_answers" not in st.session_state:
+        st.session_state["mcq_answers"] = {}
+
     if uploaded_files and st.button("🔍 Extract Topics"):
         files = [("files", (file.name, file, "application/pdf")) for file in uploaded_files]
         with st.spinner(f"Extracting topics using {selected_model.capitalize()}... ⏳"):
@@ -195,31 +201,101 @@ def mcq_generation():
             )
 
         if response.status_code == 200:
-            st.session_state["mcqs"] = response.json()
-            if st.session_state["mcqs"]:
-                st.subheader("📚 Generated MCQs")
-                for mcq in st.session_state["mcqs"]:
-                    with st.expander(f"📝 {mcq['question']}"):
-                        for option in mcq["options"]:
-                            st.write(option)
-                        st.success(f"✅ Correct Answer: {mcq['correct_answer']}")
-            else:
-                st.warning("⚠ No MCQs were generated.")
+            st.session_state["mcqs"] = response.json()  # Store MCQs persistently
+            st.session_state["mcq_answers"] = {}  # Reset answers
+
+    if st.session_state["mcqs"]:  # Show MCQs only if they exist
+        st.subheader("📚 Generated MCQs")
+
+        for i, mcq in enumerate(st.session_state["mcqs"]):
+            with st.expander(f"📝 {mcq['question']}"):
+                selected_option = st.radio(
+                    "Select your answer:",
+                    mcq["options"],
+                    key=f"mcq_{i}"
+                )
+
+                if st.button(f"Check Answer {i}", key=f"check_{i}"):
+                    st.session_state["mcq_answers"][i] = selected_option
+
+                # Show answer feedback inside the expander
+                if i in st.session_state["mcq_answers"]:
+                    correct_answer = mcq["correct_answer"]
+                    selected_option = st.session_state["mcq_answers"][i]
+
+                    if selected_option == correct_answer:
+                        st.success(f"✅ Correct!")
+                    else:
+                        st.error(f"❌ Incorrect! The correct answer is: **{correct_answer}**")
+
+def profile():
+    st.title("👤 User Profile")
+
+    if not st.session_state.get("token"):
+        st.warning("You need to be logged in to view your profile.")
+        return
+
+    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+    user_data = requests.get(f"{BASE_URL}/profile/", headers=headers).json()
+
+    if not user_data:
+        st.error("❌ Failed to fetch profile details.")
+        return
+
+    # Display Profile Details
+    st.subheader("Profile Information")
+    st.text_input("Username", value=user_data.get("username"), disabled=True)
+
+    # Display Latest Report if Available
+    latest_report = user_data.get("latest_report")
+    if latest_report:
+        st.subheader("📄 Latest Report")
+        st.write(f"**Student Name:** {latest_report['student_info']['name']}")
+        st.write(f"**Roll Number:** {latest_report['student_info']['roll_number']}")
+        st.write(f"**Grade:** {latest_report['student_info']['grade']}")
+        st.write(f"**School:** {latest_report['student_info']['school']}")
+
+        st.subheader("📊 Subject Performance")
+        for subject, details in latest_report["subject_performance"].items():
+            st.write(f"- **{subject}:** {details.get('final_grade', 'N/A')}")
+
+        st.subheader("💡 Strengths")
+        st.write(", ".join(latest_report["strengths"]) if latest_report["strengths"] else "No strengths identified.")
+
+        st.subheader("⚠ Weaknesses")
+        for weakness in latest_report["weaknesses"]:
+            st.write(f"- **{weakness['subject']}**: {weakness['reason']}")
+
+        st.subheader("📌 Overall Performance Summary")
+        st.write(latest_report["overall_performance_summary"])
+    else:
+        st.info("No report available. Please upload one.")
+
+    # Upload New Report
+    st.subheader("📤 Upload New Report")
+    uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
+    if uploaded_file and st.button("Upload & Generate Report"):
+        files = {"file": uploaded_file.getvalue()}
+        response = requests.post(f"{BASE_URL}/report-profile/", files=files, headers=headers)
+
+        if response.status_code == 200:
+            st.success("✅ Report uploaded and generated successfully! Refresh to view.")
+            st.rerun()
         else:
-            st.error("❌ Failed to generate MCQs. Please try again.")
+            st.error("❌ Failed to generate report.")
 
 def main():
     initialize_session()
     st.set_page_config(layout="wide", page_title="POC for Notesight")
     if st.session_state.token:
-        page = st.sidebar.radio("Features", ["Notes", "Flashcards", "MCQ", "Report Card"], key="page")
+        page = st.sidebar.radio("Features", ["Notes", "Flashcards", "MCQ", "Report Card","Profile"], key="page")
         if st.sidebar.button("Logout"): logout()
     else:
         tab1, tab2 = st.tabs(["🔑 Login", "📝 Register"])
         with tab1: login()
         with tab2: register()
     if st.session_state.token:
-        page_map = {"Notes": generate_notes, "Flashcards": generate_flashcards, "Chat": document_chat, "Report Card": report_card, "MCQ": mcq_generation}
+        page_map = {"Notes": generate_notes, "Flashcards": generate_flashcards, "Chat": document_chat, "Report Card": report_card, "MCQ": mcq_generation,"Profile":profile}
         page_map.get(st.session_state.page, lambda: None)()
 
 if __name__ == "__main__":
