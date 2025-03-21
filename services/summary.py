@@ -4,7 +4,6 @@ import os
 import asyncio
 import logging
 import pdfplumber
-import pytesseract
 from PIL import Image
 from pptx import Presentation
 import pandas as pd

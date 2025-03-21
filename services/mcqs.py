@@ -73,6 +73,24 @@ class MCQGeneratorGemini:
         except Exception as e:
             print(f"❌ Error generating MCQs: {e}")
             return ""
+    
+    def generate_personalized_mcqs(self, prompt, file_paths):
+        """Generates MCQs for the selected topics using uploaded files."""
+
+        try:
+            pdf_parts = []
+            for file_path in file_paths:
+                with open(file_path, "rb") as file:
+                    pdf_parts.append(types.Part.from_bytes(data=file.read(), mime_type="application/pdf"))
+
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[pdf_parts,prompt]
+            )
+            return response.text
+        except Exception as e:
+            print(f"❌ Error generating MCQs: {e}")
+            return ""
 
 class MCQGeneratorChatGPT:
     def __init__(self):

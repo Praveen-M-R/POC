@@ -23,7 +23,7 @@ def api_request(endpoint, method="POST", **kwargs):
         response = requests.request(method, url, **kwargs)
         if response.status_code == 200:
             try:
-                return response.json()
+                return response.json
             except ValueError:
                 return response.text
         return None
@@ -31,24 +31,41 @@ def api_request(endpoint, method="POST", **kwargs):
         st.error(f"❌ API Error: {str(e)}")
         return None
 
+import streamlit as st
+import requests
+
+BASE_URL = "http://localhost:8000"
+
 def register():
     st.subheader("📝 Register")
-    username, password = st.text_input("Username"), st.text_input("Password", type="password")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
     if st.button("Register") and username and password:
-        response = api_request("register", data={"username": username, "password": password})
-        st.success("✅ Registration successful!") if response else st.error("❌ Registration failed.")
+        response = requests.post(f"{BASE_URL}/register/", data={"username": username, "password": password})
+
+        if response.status_code == 200:
+            st.success("✅ Registration successful!")
+        else:
+            error_message = response.json().get("detail", "Registration failed.")
+            st.error(f"❌ {error_message}")
 
 def login():
     st.subheader("🔑 Login")
-    username, password = st.text_input("Username", key="login_username"), st.text_input("Password", type="password", key="login_password")
+    username = st.text_input("Username", key="login_username")
+    password = st.text_input("Password", type="password", key="login_password")
+
     if st.button("Login") and username and password:
-        response = api_request("login", data={"username": username, "password": password})
-        if response:
-            st.session_state.update({"token": response["access_token"], "username": username})
+        response = requests.post(f"{BASE_URL}/login/", data={"username": username, "password": password})
+
+        if response.status_code == 200:
+            data = response.json()
+            st.session_state.update({"token": data["access_token"], "username": username})
             st.success("✅ Login successful!")
             st.rerun()
         else:
-            st.error("❌ Login failed.")
+            error_message = response.json().get("detail", "Login failed.")
+            st.error(f"❌ {error_message}")
 
 def logout():
     st.session_state.update({"token": None, "username": None})
@@ -201,88 +218,109 @@ def mcq_generation():
             )
 
         if response.status_code == 200:
-            st.session_state["mcqs"] = response.json()  # Store MCQs persistently
-            st.session_state["mcq_answers"] = {}  # Reset answers
+            st.session_state["mcqs"] = response.json()
+            st.session_state["mcq_answers"] = {}
+    
+    if uploaded_files and st.button("🎯 Generate Personalized MCQs"):
+        token = st.session_state.get("token")
+        if not token:
+            st.error("❌ Please log in first!")
+            return
 
-    if st.session_state["mcqs"]:  # Show MCQs only if they exist
+        headers = {"Authorization": f"Bearer {token}"}
+        files = [("files", (file.name, file, "application/pdf")) for file in uploaded_files]
+        data = {"model":selected_model_key}
+
+        with st.spinner("Generating Personalized MCQs... ⏳"):
+            response = requests.post(f"{BASE_URL}/mcqs/personalized/", files=files, data=data, headers=headers)
+
+        if response.status_code == 200:
+            st.session_state["mcqs"] = response.json()
+            st.session_state["mcq_answers"] = {}
+        else: st.error("failed to generate mcqs")
+    st.session_state.setdefault("mcq_answers", {})
+    if st.session_state["mcqs"]:
         st.subheader("📚 Generated MCQs")
 
         for i, mcq in enumerate(st.session_state["mcqs"]):
             with st.expander(f"📝 {mcq['question']}"):
-                selected_option = st.radio(
+                with st.form(key=f"mcq_form_{i}"):
+                    selected_option = st.radio(
                     "Select your answer:",
                     mcq["options"],
                     key=f"mcq_{i}"
-                )
+                    )
+                    submit_button = st.form_submit_button("Check Answer")
+                    if submit_button:
+                        st.session_state["mcq_answers"][i] = selected_option
+                        correct_answer = mcq["correct_answer"]
+                        selected_letter = selected_option.split(".")[0]
+                        if selected_letter.lower() == correct_answer.lower():   
+                            st.success("✅ Correct!")
+                        else:
+                            st.error(f"❌ Incorrect! The correct answer is: **{correct_answer}**")
 
-                if st.button(f"Check Answer {i}", key=f"check_{i}"):
-                    st.session_state["mcq_answers"][i] = selected_option
+def get_user_data():
+    """Fetch user profile data from the API."""
+    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+    response = requests.get(f"{BASE_URL}/profile/", headers=headers)
+    return response.json() if response.status_code == 200 else None
 
-                # Show answer feedback inside the expander
-                if i in st.session_state["mcq_answers"]:
-                    correct_answer = mcq["correct_answer"]
-                    selected_option = st.session_state["mcq_answers"][i]
+def show_profile_info(user_data):
+    """Display user profile details."""
+    st.subheader("Profile Information")
+    st.text_input("Username", value=user_data.get("username"), disabled=True)
 
-                    if selected_option == correct_answer:
-                        st.success(f"✅ Correct!")
-                    else:
-                        st.error(f"❌ Incorrect! The correct answer is: **{correct_answer}**")
+def show_report_details(latest_report):
+    """Toggle and display student report details."""
+    if not latest_report:
+        st.info("No report available. Please upload one.")
+        return
+
+    if "show_report" not in st.session_state:
+        st.session_state.show_report = False
+
+    if st.button("📄 Show Report" if not st.session_state.show_report else "🔽 Hide Report"):
+        st.session_state.show_report = not st.session_state.show_report
+
+    if st.session_state.show_report:
+        st.subheader("📄 Latest Report")
+        student_info = latest_report.get("student_info", {})
+        st.write(f"**Student Name:** {student_info.get('name', 'N/A')}")
+        st.write(f"**Roll Number:** {student_info.get('roll_number', 'N/A')}")
+        st.write(f"**Grade:** {student_info.get('grade', 'N/A')}")
+        st.write(f"**School:** {student_info.get('school', 'N/A')}")
+
+        st.subheader("📊 Subject Performance")
+        for subject, details in latest_report.get("subject_performance", {}).items():
+            st.write(f"- **{subject}:** {details.get('final_grade', 'N/A')}")
+
+        st.subheader("💡 Strengths")
+        strengths = latest_report.get("strengths", [])
+        st.write(", ".join(strengths) if strengths else "No strengths identified.")
+
+        st.subheader("⚠ Weaknesses")
+        for weakness in latest_report.get("weaknesses", []):
+            st.write(f"- **{weakness['subject']}**: {weakness['reason']}")
+
+        st.subheader("📌 Overall Performance Summary")
+        st.write(latest_report.get("overall_performance_summary", "No summary available."))
 
 def profile():
+    """Main profile function."""
     st.title("👤 User Profile")
 
     if not st.session_state.get("token"):
         st.warning("You need to be logged in to view your profile.")
         return
 
-    headers = {"Authorization": f"Bearer {st.session_state.token}"}
-    user_data = requests.get(f"{BASE_URL}/profile/", headers=headers).json()
-
+    user_data = get_user_data()
     if not user_data:
         st.error("❌ Failed to fetch profile details.")
         return
 
-    # Display Profile Details
-    st.subheader("Profile Information")
-    st.text_input("Username", value=user_data.get("username"), disabled=True)
-
-    # Display Latest Report if Available
-    latest_report = user_data.get("latest_report")
-    if latest_report:
-        st.subheader("📄 Latest Report")
-        st.write(f"**Student Name:** {latest_report['student_info']['name']}")
-        st.write(f"**Roll Number:** {latest_report['student_info']['roll_number']}")
-        st.write(f"**Grade:** {latest_report['student_info']['grade']}")
-        st.write(f"**School:** {latest_report['student_info']['school']}")
-
-        st.subheader("📊 Subject Performance")
-        for subject, details in latest_report["subject_performance"].items():
-            st.write(f"- **{subject}:** {details.get('final_grade', 'N/A')}")
-
-        st.subheader("💡 Strengths")
-        st.write(", ".join(latest_report["strengths"]) if latest_report["strengths"] else "No strengths identified.")
-
-        st.subheader("⚠ Weaknesses")
-        for weakness in latest_report["weaknesses"]:
-            st.write(f"- **{weakness['subject']}**: {weakness['reason']}")
-
-        st.subheader("📌 Overall Performance Summary")
-        st.write(latest_report["overall_performance_summary"])
-    else:
-        st.info("No report available. Please upload one.")
-
-    # Upload New Report
-    st.subheader("📤 Upload New Report")
-    uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
-    if uploaded_file and st.button("Upload & Generate Report"):
-        files = {"file": uploaded_file.getvalue()}
-        response = requests.post(f"{BASE_URL}/report-profile/", files=files, headers=headers)
-
-        if response.status_code == 200:
-            st.success("✅ Report uploaded and generated successfully! Refresh to view.")
-            st.rerun()
-        else:
-            st.error("❌ Failed to generate report.")
+    show_profile_info(user_data)
+    show_report_details(user_data.get("latest_report"))
 
 def main():
     initialize_session()

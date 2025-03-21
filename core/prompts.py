@@ -192,3 +192,80 @@ Ensure that the response is strictly in a properly formatted **JSON structure**.
   "overall_performance_summary": "John Doe has performed well in Mathematics and Science, demonstrating strong analytical and problem-solving skills. However, he struggles with History, indicating a need for improved reading and comprehension strategies. His overall performance is good, with an average percentage of 80%."
 }
 """
+
+MCQ_PROMPT_WITH_REPORT = """ 
+You are an expert test creator, designing a **high-quality exam-style test** for a student preparing for an exam.  
+### **Test Creation Guidelines:**  
+1. **Strictly Use Document Content:**  
+   - **All questions must come from the uploaded document.**  
+   - Do **not** introduce any external knowledge or additional sources.  
+   - The test should feel like it was made directly from a textbook or class notes.  
+
+2. **Relevance Check:**  
+   - The student has **strong areas** in: **{strengths}**  
+   - The student has **weak areas** in: **{weaknesses}**  
+   - If the document contains **relevant content** on these topics, use strengths(30%) & weaknesses(70%) for question selection.  
+   - **If the document does NOT cover these topics, ignore strengths and weaknesses and only use document content.**  
+
+3. **Topic-Wise Coverage:**  
+   - Identify the **key topics** in the document.  
+   - Ensure questions **cover all important topics**, balancing distribution across them.  
+   - Avoid focusing too much on a single topic unless the document is heavily focused on it.  
+
+4. **Exam-Like Question Selection:**  
+   - The questions should feel like a **real test** a student would take before an exam.  
+   - Include a mix of **conceptual, application-based, and critical-thinking questions**.  
+   - Avoid overly simple questions; ensure a moderate-to-high level of difficulty.  
+
+5. **Answer Choices:**  
+   - Each question must have exactly **four options**.  
+   - Only **one correct answer**, and the other three should be **plausible but incorrect**.  
+   - Avoid misleading or overly obvious choices.  
+
+6. **Explanation Field:**  
+   - Provide a **clear and precise** explanation for the correct answer.  
+   - Explanations should be **concise, relevant, and helpful for learning**.  
+   - **Do not mention** phrases like "according to the document" or "as per the text."  
+### **Output Format:**  
+Return the questions in **valid JSON format only**, without any additional text. The structure must be:
+"Topic": "<Topic Name>",
+"Question": "<MCQ Question>",
+"Options": ["A. <Option 1>", "B. <Option 2>", "C. <Option 3>", "D. <Option 4>"],
+"Correct Answer": "<Correct Answer Letter>",
+"Explanation": "<Explanation>"
+   """
+
+MCQ_PROMPT_WITHOUT_REPORT="""You are a STEM expert tasked with generating a test based on a provided document. Create multiple-choice questions (MCQs) strictly derived from the document's content.
+Guidelines for Test Question Creation:
+Question Formation:
+
+Each question must be relevant to the key topics, terms, or concepts covered in the document.
+Ensure clarity and precision in question wording.
+Answer Choices:
+
+Each question should have exactly four answer choices.
+Only one answer must be correct, and the remaining three should be plausible but incorrect options.
+Avoid answers that are too obvious or misleading.
+Explanation Field:
+
+The "explanation" should provide a clear and concise description of why the correct answer is valid.
+Ensure explanations are strictly derived from the document content.
+Do not introduce any external information.
+Content Boundaries:
+
+The questions and answers must be strictly based on the provided document.
+Do not include any external information.
+Output Format:
+Return the questions in valid JSON format only, without any additional text. The structure must be:
+```json
+[
+    {
+        "Topic": "<Topic Name>",
+        "Question": "<MCQ Question>",
+        "Options": ["A. <Option 1>", "B. <Option 2>", "C. <Option 3>", "D. <Option 4>"],
+        "Correct Answer": "<Correct Answer Letter>",
+        "Explanation": "<Explanation>"
+    }
+]
+```
+"""

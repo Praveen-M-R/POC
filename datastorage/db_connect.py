@@ -1,14 +1,18 @@
-from pymongo import MongoClient
-from bson import ObjectId
-from core.config import MONGO_URI
+import firebase_admin
+from firebase_admin import credentials, firestore
+from core.config import FIREBASE_CREDENTIALS_PATH 
 
-client = MongoClient(MONGO_URI)
-db = client["school_database"]
-users_collection = db["users"]
-reports_collection = db["reports"]
+# Initialize Firebase
+cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+
+# Firestore collections
+users_collection = db.collection("users")
+reports_collection = db.collection("reports")
 
 def save_student_report(report):
-    """Saves the generated student report to MongoDB."""
-    result = reports_collection.insert_one(report)
-    report["_id"] = str(result.inserted_id)
+    """Saves the generated student report to Firestore."""
+    doc_ref = reports_collection.add(report)
+    report["_id"] = doc_ref[1].id  # Firestore auto-generates an ID
     return report
