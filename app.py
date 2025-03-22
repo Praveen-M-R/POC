@@ -6,7 +6,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 import io
 import re
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "https://notesight-poc.onrender.com"
 
 def initialize_session():
     for key, default in {
@@ -34,7 +34,6 @@ def api_request(endpoint, method="POST", **kwargs):
 import streamlit as st
 import requests
 
-BASE_URL = "http://localhost:8000"
 
 def register():
     st.subheader("📝 Register")

@@ -17,10 +17,3 @@ def save_student_report(report):
     doc_ref = reports_collection.add(report)
     report["_id"] = doc_ref[1].id  # Firestore auto-generates an ID
     return report
-
-if not firebase_admin._apps:
-    firebase_creds = os.getenv("FIREBASE_CREDS")
-    cred_dict = json.loads(firebase_creds)
-    cred = credentials.Certificate(cred_dict)
-    firebase_admin.initialize_app(cred)
-db = firestore.client()
