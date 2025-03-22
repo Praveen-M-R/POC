@@ -6,7 +6,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 import io
 import re
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://127.0.0.1:8000"
 
 def initialize_session():
     for key, default in {
@@ -34,7 +34,6 @@ def api_request(endpoint, method="POST", **kwargs):
 import streamlit as st
 import requests
 
-BASE_URL = "http://localhost:8000"
 
 def register():
     st.subheader("📝 Register")
@@ -274,8 +273,20 @@ def show_profile_info(user_data):
 def show_report_details(latest_report):
     """Toggle and display student report details."""
     if not latest_report:
-        st.info("No report available. Please upload one.")
-        return
+        st.info("No report available. Please upload one below.")
+        # Add file uploader for PDF
+        uploaded_file = st.file_uploader("Upload a PDF report", type=["pdf"])
+        if uploaded_file is not None:
+            # Call the API to upload the report
+            headers = {"Authorization": f"Bearer {st.session_state.token}"}
+            files = {"file": (uploaded_file.name, uploaded_file, "application/pdf")}
+            response = requests.post(f"{BASE_URL}/report-profile/", headers=headers, files=files)
+            
+            if response.status_code == 200:
+                st.success("Report uploaded successfully! Refresh the page to see the updated report.")
+            else:
+                st.error(f"Failed to upload report: {response.json().get('detail', 'Unknown error')}")
+        return  # Exit early if no report exists yet
 
     if "show_report" not in st.session_state:
         st.session_state.show_report = False
@@ -305,7 +316,6 @@ def show_report_details(latest_report):
 
         st.subheader("📌 Overall Performance Summary")
         st.write(latest_report.get("overall_performance_summary", "No summary available."))
-
 def profile():
     """Main profile function."""
     st.title("👤 User Profile")

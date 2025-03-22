@@ -22,7 +22,6 @@ from services.report import process_pdf,extract_json
 from datastorage.db_connect import save_student_report
 import re
 from services.auth import hash_password, verify_password, create_access_token, decode_access_token, get_user_by_username
-from datastorage.db_connect import users_collection
 from datetime import timedelta
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from services.auth import get_user_by_id
@@ -39,17 +38,33 @@ from core.prompts import MCQ_PROMPT_WITH_REPORT,MCQ_PROMPT_WITHOUT_REPORT
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+async def get_user_by_username(username: str):
+    """Helper function to get user from MongoDB by username."""
+    user = users_collection.find_one({"username": username})
+    if user:
+        user['id'] = str(user['_id'])
+        del user['_id']
+        return user
+    return None
+
 @router.post("/register/")
 async def register(username: str = Form(...), password: str = Form(...)):
-    """Registers a new user and stores it in Firestore."""
+    """Registers a new user and stores it in MongoDB."""
     if await get_user_by_username(username):
         raise HTTPException(status_code=400, detail="User already exists")
     
     hashed_password = hash_password(password)
-    user_data = {"username": username, "password": hashed_password, "reports": []}
+    user_data = {
+        "username": username,
+        "password": hashed_password,
+        "reports": []
+    }
     
-    user_ref = users_collection.add(user_data)
-    return {"message": "User registered successfully", "user_id": user_ref[1].id}
+    result = users_collection.insert_one(user_data)
+    return {
+        "message": "User registered successfully",
+        "user_id": str(result.inserted_id)
+    }
 
 @router.post("/login/")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -59,9 +74,14 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if not user or not verify_password(form_data.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
-    access_token = create_access_token(data={"sub": user["id"]}, expires_delta=timedelta(minutes=30))
+    access_token = create_access_token(
+        data={"sub": user["id"]},
+        expires_delta=timedelta(minutes=30)
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
+def close_db_connection():
+    client.close()
 
 @router.post("/notes/")
 async def generate_notes(files: list[UploadFile] = File(...), model: str = Form(...)):
@@ -181,7 +201,7 @@ async def upload_and_generate_report(file: UploadFile = File(...)):
 
 @router.post("/report-profile/")
 async def upload_and_generate_report(file: UploadFile = File(...), token: str = Depends(oauth2_scheme)):
-    """Uploads a PDF, generates a report, saves it to Firestore, and links it to the user."""
+    """Uploads a PDF, generates a report, saves it to MongoDB, and links it to the user."""
     try:
         pdf_data = await file.read()
         student_report = process_pdf(pdf_data)
@@ -190,25 +210,25 @@ async def upload_and_generate_report(file: UploadFile = File(...), token: str = 
         if not isinstance(student_report, dict):
             raise HTTPException(status_code=400, detail="Failed to generate a structured report")
 
-        print("✅ Report successfully generated.")
 
-        report_ref = reports_collection.add(student_report)
-        doc_id = report_ref[1].id
-
-        print("📌 Report saved to Firestore:", doc_id)
+        report_result = reports_collection.insert_one(student_report)
+        doc_id = str(report_result.inserted_id)
 
         decoded_data = decode_access_token(token)
         user_id = decoded_data["payload"].get("sub")
         if not user_id:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        user_ref = users_collection.document(user_id)
-        user_ref.update({"latest_report_id": doc_id})
-
-        return {
-            "message": "Report generated and saved successfully",
-            "data": {"_id": doc_id, **student_report},
-        }
+        users_collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"latest_report_id": doc_id}}
+        )
+        print("report updated")
+        if isinstance(student_report, dict): 
+            saved_report = save_student_report(student_report)
+            return {"message": "Report generated and saved successfully", "data": saved_report}
+        else:
+            return {"message": "Failed to generate a structured report", "data": student_report}
 
     except Exception as e:
         print("❌ Error in upload_and_generate_report:", str(e))
@@ -220,23 +240,21 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         decoded_data = decode_access_token(token)
         user_id = decoded_data["payload"].get("sub")
-
         if not user_id:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        user_ref = users_collection.document(user_id).get()
-        if not user_ref.exists:
+        user = users_collection.find_one({"_id":ObjectId(user_id)})
+        if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        user_data = user_ref.to_dict()
+        user_data = dict(user)
         latest_report = None
 
         if "latest_report_id" in user_data:
-            report_ref = reports_collection.document(user_data["latest_report_id"]).get()
-            if report_ref.exists:
-                latest_report = report_ref.to_dict()
-                latest_report["_id"] = user_data["latest_report_id"]
-
+            report = reports_collection.find_one({"_id": user_data["latest_report_id"]})
+            if report:
+                latest_report = dict(report)
+                latest_report["_id"] = str(latest_report["_id"])
         return {
             "username": user_data["username"],
             "latest_report": latest_report
@@ -248,6 +266,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 class MCQRequest(BaseModel):
     model: str
     file_paths: List[str]
+
 
 @router.post("/mcqs/personalized/", response_model=List[MCQResponse])
 async def generate_personalized_mcqs(
@@ -261,16 +280,16 @@ async def generate_personalized_mcqs(
         if not user_id:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        user_ref = users_collection.document(user_id).get()
-        if not user_ref.exists:
+        user = users_collection.find_one({"_id": user_id})
+        if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        user_data = user_ref.to_dict()
+        user_data = dict(user)
 
         latest_report = None
         if "latest_report_id" in user_data:
-            report_ref = reports_collection.document(user_data["latest_report_id"]).get()
-            if report_ref.exists:
-                latest_report = report_ref.to_dict()
+            report = reports_collection.find_one({"_id": user_data["latest_report_id"]})
+            if report:
+                latest_report = dict(report)
 
         weak_areas = latest_report.get("weaknesses", []) if latest_report else []
         strong_areas = latest_report.get("strengths", []) if latest_report else []
@@ -292,7 +311,7 @@ async def generate_personalized_mcqs(
                 buffer.write(await file.read())
             full_paths.append(file_path)
         
-        mcqs = mcq_generator.generate_personalized_mcqs(prompt,full_paths)
+        mcqs = mcq_generator.generate_personalized_mcqs(prompt, full_paths)
 
         if not mcqs:
             raise HTTPException(status_code=500, detail="Failed to generate MCQs")
@@ -307,6 +326,7 @@ async def generate_personalized_mcqs(
             print("❌ JSON Parsing Error:", e)
             print("Raw MCQ Response:", mcqs)
             raise HTTPException(status_code=500, detail="Failed to parse MCQs")
+        
         formatted_mcqs = [
             {
                 "topic": mcq["Topic"],

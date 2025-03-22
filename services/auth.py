@@ -1,9 +1,13 @@
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 import jwt
-from datastorage.db_connect import users_collection
+from pymongo import MongoClient
 from fastapi import HTTPException
-from google.cloud.firestore_v1 import FieldFilter
+from core.config import MONGODB_URI
+
+client = MongoClient(MONGODB_URI)
+db = client['notesight']
+users_collection = db['users']
 
 SECRET_KEY = "demo"
 ALGORITHM = "HS256"
@@ -46,12 +50,24 @@ def decode_access_token(token: str):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_user_by_username(username: str):
-    """Fetches a user by username from Firestore."""
-    query = users_collection.where(filter=FieldFilter("username", "==", username)).limit(1).stream()
-    users = [doc.to_dict() | {"id": doc.id} for doc in query]
-    return users[0] if users else None
+    """Fetches a user by username from MongoDB."""
+    user = users_collection.find_one({"username": username})
+    if user:
+        user_data = dict(user)
+        user_data['id'] = str(user_data['_id'])
+        del user_data['_id']
+        return user_data
+    return None
 
 async def get_user_by_id(user_id: str):
-    """Fetches a user by ID from Firestore."""
-    user_ref = users_collection.document(user_id).get()
-    return user_ref.to_dict() | {"id": user_id} if user_ref.exists else None
+    """Fetches a user by ID from MongoDB."""
+    user = users_collection.find_one({"_id": user_id})
+    if user:
+        user_data = dict(user)
+        user_data['id'] = str(user_data['_id'])
+        del user_data['_id']
+        return user_data
+    return None
+
+def close_db_connection():
+    client.close()
